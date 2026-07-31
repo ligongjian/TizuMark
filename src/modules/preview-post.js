@@ -313,19 +313,52 @@ async function processMermaid(preview, opts) {
   }
 }
 
+function getLanguageLabel(codeEl) {
+  if (!codeEl) return '';
+  const m = (codeEl.className || '').match(/language-([a-zA-Z0-9_-]+)/);
+  if (!m) return '';
+  const lang = m[1];
+  // 常见语言显示友好名，其余直接显示语言名
+  const friendly = {
+    js: 'JavaScript',
+    ts: 'TypeScript',
+    jsx: 'JSX',
+    tsx: 'TSX',
+    json: 'JSON',
+    html: 'HTML',
+    css: 'CSS',
+    scss: 'SCSS',
+    less: 'Less',
+    yaml: 'YAML',
+    yml: 'YAML',
+    md: 'Markdown',
+    py: 'Python',
+    sh: 'Shell',
+    bash: 'Shell',
+    powershell: 'PowerShell',
+    ps1: 'PowerShell',
+    sql: 'SQL',
+    diff: 'Diff',
+  };
+  return friendly[lang] || lang;
+}
+
 function addCopyButtons(preview, opts) {
   const { t } = opts;
   preview.querySelectorAll('pre').forEach(pre => {
     if (pre.querySelector('.copy-btn')) return;
     if (pre.querySelector('code.language-mermaid')) return;
 
+    const code = pre.querySelector('code');
+    const langLabel = getLanguageLabel(code) || t('copy');
+
     const btn = document.createElement('button');
     btn.className = 'copy-btn';
-    btn.textContent = t('copy');
+    btn.textContent = langLabel;
     btn.title = t('copyCode');
+    btn.dataset.langLabel = langLabel;
 
     btn.addEventListener('click', async () => {
-      const code = pre.querySelector('code');
       let text;
       if (code) {
         // 行号结构为 <span class="code-line-num"> 和 <span class="code-line-text"> 并列，
@@ -342,7 +375,7 @@ function addCopyButtons(preview, opts) {
         btn.textContent = t('copied');
         btn.classList.add('copied');
         setTimeout(() => {
-          btn.textContent = t('copy');
+          btn.textContent = btn.dataset.langLabel;
           btn.classList.remove('copied');
         }, 2000);
       } catch (err) {
@@ -355,7 +388,7 @@ function addCopyButtons(preview, opts) {
         btn.textContent = t('copied');
         btn.classList.add('copied');
         setTimeout(() => {
-          btn.textContent = t('copy');
+          btn.textContent = btn.dataset.langLabel;
           btn.classList.remove('copied');
         }, 2000);
       }
