@@ -1608,8 +1608,6 @@ body.is-resizing .side-btn {
 }
 
 .code-scroll {
-  max-height: 500px;
-  overflow-y: auto;
 }
 
 /* 代码块行号 & 自动换行 */
