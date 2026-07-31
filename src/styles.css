@@ -1771,6 +1771,24 @@ body.is-resizing .side-btn {
   -webkit-user-drag: none;
 }
 
+.lightbox-svg-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  padding: 24px;
+  cursor: default;
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow: auto;
+}
+
+.lightbox-svg-wrapper svg {
+  display: block;
+}
+
 .lightbox-hint {
   position: fixed;
   top: 20px;

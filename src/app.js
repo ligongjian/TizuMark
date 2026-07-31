@@ -4765,11 +4765,9 @@ class MarkdownEditor {
       if (rect.width > 0 && rect.height > 0) {
         naturalW = rect.width;
         naturalH = rect.height;
-        const fitScale = Math.min(window.innerWidth / naturalW, window.innerHeight / naturalH, 1);
-        if (fitScale < 1) {
-          scale = fitScale;
-          updateTransform();
-        }
+        const fitScale = Math.min(window.innerWidth / naturalW, window.innerHeight / naturalH);
+        scale = type === 'svg' ? fitScale : Math.min(fitScale, 1);
+        updateTransform();
       } else {
         requestAnimationFrame(initFit);
       }
