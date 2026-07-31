@@ -10,7 +10,81 @@
   <link rel="stylesheet" href="lib/codemirror/theme/material-darker.css">
   <link rel="stylesheet" href="lib/codemirror/addon/dialog/dialog.css">
   <link rel="stylesheet" href="lib/highlight.js/github.min.css" id="highlight-theme">
-  <link rel="stylesheet" href="lib/katex/katex.min.css">
+    <link rel="stylesheet" href="lib/katex/katex.min.css">
+  <!-- P0-1 全局错误兜底：在首个业务脚本之前注册。
+       捕获阶段监听 window 'error'，同时兜住：
+         (a) 运行时抛错（含 app.js:1 顶层解构 TypeError 这类白屏单点）；
+         (b) 资源加载失败（<script>/<link> 缺失，捕获阶段才能收到）。
+       比「全局 handler + 逐脚本 onerror」更健壮且无冗余。 -->
+  <script>
+    (function () {
+      var bar = null;
+      function showErrorBar(msg, level) {
+        try {
+          if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'fatal-error-bar';
+            bar.setAttribute('role', 'alert');
+            // 插入 #app 内部最顶部，不遮挡 Tauri 标题栏和窗口控制按钮
+            var app = document.getElementById('app');
+            if (app) { app.insertBefore(bar, app.firstChild); }
+            else { (document.body || document.documentElement).appendChild(bar); }
+          }
+          var bg = level === 'warn' ? '#d97706' : '#b00020';
+          var prefix = level === 'warn' ? '⚠️ 警告：' : '❌ 错误：';
+          bar.style.cssText = 'display:block;' +
+            'background:' + bg + ';color:#fff;font:12px/1.5 system-ui,-apple-system,sans-serif;' +
+            'padding:8px 36px 8px 14px;white-space:pre-wrap;word-break:break-all;' +
+            'box-shadow:0 2px 6px rgba(0,0,0,.25);position:relative;';
+          bar.innerHTML = '<span>' + prefix + escapeHtml(msg) + '</span>' +
+            '<button onclick="this.parentElement.style.display=\'none\'"' +
+            ' style="position:absolute;right:8px;top:50%;transform:translateY(-50%);' +
+            'background:none;border:none;color:#fff;cursor:pointer;font-size:16px;padding:0 4px;">×</button>';
+          bar.style.display = 'block';
+        } catch (e) { /* 兜底自身失败不再抛 */ }
+      }
+      function escapeHtml(s) {
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      }
+      window.addEventListener('error', function (ev) {
+        // 资源加载失败
+        if (ev && ev.target && ev.target !== ev.currentTarget && ev.target.tagName) {
+          var tag = ev.target.tagName.toLowerCase();
+          // img/audio/video 等预览资源加载失败由 processImages 负责（base64 替换 / 标红），
+          // 浏览器初次尝试 http 加载的 404 是瞬时噪声，全局兜底不应介入，直接忽略。
+          if (tag === 'img' || tag === 'audio' || tag === 'video' || tag === 'source') {
+            return;
+          }
+          // script / link / stylesheet 加载失败是致命的
+          var src2 = (ev.target.getAttribute && (ev.target.src || ev.target.href)) || '(未知资源)';
+          console.error('[P0-1] 致命资源加载失败 <' + tag + '>：' + src2);
+          showErrorBar('资源加载失败 <' + tag + '>：' + src2, 'error');
+          return;
+        }
+        // JS 运行时错误
+        var msg = '';
+        if (ev && ev.message) {
+          msg = String(ev.message);
+        } else if (ev && ev.error && ev.error.message) {
+          msg = String(ev.error.message);
+        } else if (ev && ev.error) {
+          msg = String(ev.error);
+        } else {
+          console.warn('[P0-1] 收到无信息的 error Event（可能为 WebView 初始化噪声）', ev);
+          return;
+        }
+        if (ev && ev.filename) msg += '  (' + ev.filename + ':' + (ev.lineno || '?') + ':' + (ev.colno || '?') + ')';
+        console.error('[P0-1] 运行时错误：' + msg, ev.error || '');
+        showErrorBar(msg, 'error');
+      }, true);
+      window.addEventListener('unhandledrejection', function (ev) {
+        var r = ev && ev.reason;
+        var msg = (r && r.stack) ? r.stack : (r ? String(r) : '(空 reason)');
+        console.error('[P0-1] 未处理的 Promise 拒绝：' + msg, r);
+        showErrorBar('未处理的 Promise 拒绝：' + msg, 'error');
+      });
+    })();
+  </script>
 </head>
 <body>
   <div id="app">

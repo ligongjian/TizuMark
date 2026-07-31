@@ -138,9 +138,39 @@ async function buildEnv(options = {}) {
   require('codemirror/addon/search/search.js'); // 统一加载，避免个别测试按需加载导致 require 缓存中 CodeMirror.commands 状态不一致
 
   const modulesDir = path.join(ROOT, 'src', 'modules');
-  for (const f of fs.readdirSync(modulesDir).filter(x => x.endsWith('.js'))) {
-    try { w.eval(fs.readFileSync(path.join(modulesDir, f), 'utf8')); }
-    catch (_) { /* 个别模块可能需要外部库，初始化关键路径已覆盖，忽略加载失败 */ }
+  const allModuleFiles = fs.readdirSync(modulesDir)
+    .filter((x) => x.endsWith('.js'))
+    .filter((x) => fs.statSync(path.join(modulesDir, x)).isFile());
+
+  // 显式优先加载（不依赖字典序，N5）：PRIORITY_MODULES 若存在则排到最前。
+  // tauri-api.js 由 P0-2a 新增；此刻尚不存在，列入仅做"接入即生效"的预备，无副作用。
+  const PRIORITY_MODULES = ['tauri-api.js'];
+  // 关键模块：加载失败必须抛出而非静默吞（T15 / N5 护栏）。
+  // 现有 6 个 + 即将新增的 tauri-api / preview-window（不存在时无影响）。
+  const CRITICAL_MODULES = new Set([
+    'code-block.js', 'preview-post.js', 'word-count.js', 'outline.js',
+    'dialogs.js', 'find-replace.js', 'tauri-api.js', 'preview-window.js',
+  ]);
+
+  const priority = allModuleFiles.filter((f) => PRIORITY_MODULES.includes(f));
+  const rest = allModuleFiles.filter((f) => !PRIORITY_MODULES.includes(f));
+  // 其余保持稳定顺序（模块本应加载顺序不敏感，这里只为可复现）
+  rest.sort();
+  const ordered = [...priority, ...rest];
+
+  for (const f of ordered) {
+    const full = path.join(modulesDir, f);
+    try {
+      w.eval(fs.readFileSync(full, 'utf8'));
+    } catch (e) {
+      if (CRITICAL_MODULES.has(f)) {
+        throw new Error(
+          `[harness] 关键模块 ${f} 加载失败，终止初始化（原错误：${e && e.stack ? e.stack : e}）`,
+        );
+      }
+      // 非关键模块：保留原"吞掉"行为，仅告警
+      console.warn(`[harness] 模块 ${f} 加载失败（非关键，已忽略）：${e && e.message}`);
+    }
   }
 
   // 加载 src/lib/md-links.js：UMD 模块，浏览器环境挂到 root（即 jsdom window），
