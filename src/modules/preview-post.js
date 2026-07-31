@@ -326,7 +326,17 @@ function addCopyButtons(preview, opts) {
 
     btn.addEventListener('click', async () => {
       const code = pre.querySelector('code');
-      const text = code ? code.textContent : pre.textContent;
+      let text;
+      if (code) {
+        // 行号结构为 <span class="code-line-num"> 和 <span class="code-line-text"> 并列，
+        // textContent 会把行号数字一起读进来，因此只取各行的 code-line-text。
+        const lineTexts = code.querySelectorAll('.code-line-text');
+        text = lineTexts.length > 0
+          ? Array.from(lineTexts).map(el => el.textContent).join('\n')
+          : code.textContent;
+      } else {
+        text = pre.textContent;
+      }
       try {
         await navigator.clipboard.writeText(text);
         btn.textContent = t('copied');
