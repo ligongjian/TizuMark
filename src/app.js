@@ -7245,8 +7245,18 @@ input[type="checkbox"]:checked::after { display: none !important; }
       await this.refreshFileMeta(tab);
       tab.pendingExternalChange = false;
       if (tab === this.activeTab) {
+        // 保存当前光标与滚动位置，避免重新加载后回弹到顶部
+        const scrollInfo = this.cm.getScrollInfo();
+        const cursorPos = this.cm.getCursor();
+        const previewScrollTop = this.preview.scrollTop;
+        // 清图片 base64 缓存强制重读（图片也可能在外部被改动）
+        this._imageBase64Cache.clear();
         this.cm.setValue(content);
-        this.updatePreview();
+        clearTimeout(this.debounceTimer);
+        this.cm.setCursor(cursorPos);
+        this.cm.clearHistory();
+        await this.updatePreview();
+        this._restoreSwitchScroll(scrollInfo, previewScrollTop);
         this.updateOutline();
         this.updateWordCount();
       }
