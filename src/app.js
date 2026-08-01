@@ -3291,6 +3291,7 @@ class MarkdownEditor {
       const tabEl = document.createElement('div');
       tabEl.className = `tab${i === this.activeTabIndex ? ' active' : ''}${tab.isModified ? ' modified' : ''}`;
       tabEl.dataset.index = i;
+      tabEl.title = tab.filePath || tab.name;
       tabEl.setAttribute('role', 'tab');
       tabEl.setAttribute('aria-selected', i === this.activeTabIndex ? 'true' : 'false');
 
