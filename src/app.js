@@ -83,6 +83,7 @@ const I18N = {
     collapseToolbar: '收起工具栏',
     mathBlock: '数学公式',
     mermaidChart: 'Mermaid 图表',
+    mermaidRenderError: 'Mermaid 图表渲染失败',
     hr: '水平线',
     toc: '目录 [TOC]',
     textFormat: '文本格式',
@@ -438,6 +439,7 @@ const I18N = {
     ecbIgnoreAll: 'Ignore All',
     mathBlock: 'Math Block',
     mermaidChart: 'Mermaid Chart',
+    mermaidRenderError: 'Mermaid chart failed to render',
     hr: 'Horizontal Rule',
     toc: 'Table of Contents',
     textFormat: 'Text Format',
@@ -2120,7 +2122,25 @@ class MarkdownEditor {
         securityLevel: 'loose',
         fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--font-preview').trim() || '-apple-system, sans-serif',
       });
-      await mermaid.run({ nodes: Array.from(this.preview.querySelectorAll('.mermaid-container')) });
+
+      const newContainers = Array.from(this.preview.querySelectorAll('.mermaid-container'));
+      for (const c of newContainers) {
+        const code = c.getAttribute('data-code') || c.textContent;
+        if (!code) continue;
+        try {
+          const result = await mermaid.render('m', code);
+          c.innerHTML = result.svg;
+        } catch (e) {
+          const msg = (e && e.message) ? String(e.message) : '';
+          const truncated = msg.length > 120 ? msg.slice(0, 120) + '…' : msg;
+          const title = this.t('mermaidRenderError');
+          c.innerHTML =
+            '<div class="mermaid-error">' +
+              '<div class="mermaid-error-title">' + this.escapeHtml(title) + '</div>' +
+              (truncated ? '<div class="mermaid-error-detail">' + this.escapeHtml(truncated) + '</div>' : '') +
+            '</div>';
+        }
+      }
     } catch (e) {
       console.error('Mermaid re-render error:', e);
     }
@@ -5964,7 +5984,16 @@ ${clone.innerHTML}
             }
             mermaidContainers[i].replaceWith(wrapper);
           } catch (e) {
-            console.error('Mermaid PDF render error for diagram', i, ':', e);
+            const msg = (e && e.message) ? String(e.message) : '';
+            const truncated = msg.length > 120 ? msg.slice(0, 120) + '…' : msg;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'mermaid-container';
+            wrapper.innerHTML =
+              '<div class="mermaid-error">' +
+                '<div class="mermaid-error-title">' + this.escapeHtml(this.t('mermaidRenderError')) + '</div>' +
+                (truncated ? '<div class="mermaid-error-detail">' + this.escapeHtml(truncated) + '</div>' : '') +
+              '</div>';
+            mermaidContainers[i].replaceWith(wrapper);
           }
         }
       }
@@ -6813,6 +6842,7 @@ input[type="checkbox"]:checked::after { display: none !important; }
         escapeAttr: (s) => this.escapeAttr(s),
         headingToId: (s) => this.headingToId(s),
         mermaidCache: this._mermaidCache,
+        mermaidRenderError: this.t('mermaidRenderError'),
       };
       try { PreviewPost.processEmojiShortcodes(this.preview); } catch (e) { console.warn('[preview] Emoji error:', e); }
       try { PreviewPost.processMath(this.preview); } catch (e) { console.warn('[preview] Math error:', e); }
