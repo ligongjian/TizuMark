@@ -31,6 +31,7 @@ class Tab {
     this._loaded = true;
     this.previewScrollTop = 0;
     this.fontSize = null; // 每标签独立缩放字号；null=未初始化，切换时按 settings.fontSize 初始化
+    this.previewFontSize = null; // 每标签独立预览缩放字号；null=未初始化，切换时按 settings.previewFontSize 初始化
   }
 
   get isModified() {
@@ -402,6 +403,8 @@ const I18N = {
     fontSizeChanged: '字号 {size}px',
     fontSizeHint: '字号 {size}px',
     fontSizeReset: '还原 {base}px',
+    previewFontSizeHint: '预览字号 {size}px',
+    previewFontSizeReset: '还原 {base}px',
     switchWorkspaceTitle: '切换工作区',
     switchWorkspaceMsg: '当前已打开工作区，是否切换到 {path}？',
     sidebar: '侧边栏',
@@ -748,6 +751,8 @@ const I18N = {
     fontSizeChanged: 'Font size {size}px',
     fontSizeHint: 'Font size {size}px',
     fontSizeReset: 'Reset to {base}px',
+    previewFontSizeHint: 'Preview font size {size}px',
+    previewFontSizeReset: 'Reset to {base}px',
     switchWorkspaceTitle: 'Switch Workspace',
     switchWorkspaceMsg: 'A workspace is already open. Switch to {path}?',
     sidebar: 'Sidebar',
@@ -1470,6 +1475,7 @@ class MarkdownEditor {
     });
     document.getElementById('set-preview-font-size').addEventListener('change', (e) => {
       this.settings.previewFontSize = Number(e.target.value);
+      if (this.activeTab) delete this.activeTab.previewFontSize; // 重置每标签临时预览缩放，让新基准生效
       this.saveSettings();
     });
     document.getElementById('set-line-height').addEventListener('change', (e) => {
@@ -1833,7 +1839,10 @@ class MarkdownEditor {
 
   async applySettings() {
     const s = this.settings;
-    if (this.activeTab) this.activeTab.fontSize = s.fontSize;
+    if (this.activeTab) {
+      this.activeTab.fontSize = s.fontSize;
+      delete this.activeTab.previewFontSize; // 重置每标签临时预览缩放
+    }
     this.cm.getWrapperElement().style.fontSize = s.fontSize + 'px';
     this.cm.setOption('tabSize', s.tabSize);
     this.cm.setOption('indentUnit', s.tabSize);
@@ -2849,6 +2858,64 @@ class MarkdownEditor {
       this.showZoomHint();
     }, true);  // capture：先于 CM 内部 mousewheel 监听拦截
 
+    // ====== 预览区 Ctrl + 鼠标滚轮缩放字号（与编辑器模式一致，不持久化）======
+    this.preview.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const tab = this.activeTab;
+      if (!tab) return;
+      const base = this.settings.previewFontSize;
+      const cur = tab.previewFontSize ?? base;
+      const next = Math.max(8, Math.min(72, cur + (e.deltaY < 0 ? 1 : -1)));
+      if (next === cur) return;
+      tab.previewFontSize = next;
+      this.preview.style.fontSize = next + 'px';
+      this.showPreviewZoomHint();
+    }, true);  // capture：先于内部监听拦截
+
+    this.showPreviewZoomHint = () => {
+      const tab = this.activeTab;
+      if (!tab || !this.zoomHint) return;
+      const base = this.settings.previewFontSize;
+      const cur = tab.previewFontSize ?? base;
+      const textEl = this.zoomHint.querySelector('.zoom-hint-text');
+      const resetEl = this.zoomHint.querySelector('.zoom-hint-reset');
+      textEl.textContent = this.t('previewFontSizeHint', { size: cur });
+      if (cur !== base) {
+        resetEl.textContent = this.t('previewFontSizeReset', { base });
+        resetEl.classList.remove('hidden');
+      } else {
+        resetEl.classList.add('hidden');
+      }
+      this.zoomHint.classList.add('show');
+      clearTimeout(this._zoomHintTimer);
+      if (!this._zoomHintHovering) {
+        this._zoomHintTimer = setTimeout(() => this.zoomHint.classList.remove('show'), 3000);
+      }
+    };
+
+    this.resetPreviewFontSize = () => {
+      const tab = this.activeTab;
+      if (!tab) return;
+      delete tab.previewFontSize;
+      this.preview.style.fontSize = this.settings.previewFontSize + 'px';
+      this.showPreviewZoomHint();
+    };
+
+    // 还原按钮：根据缩放来源分别处理编辑器/预览区字号
+    this.zoomHint.querySelector('.zoom-hint-reset').removeEventListener('click', () => this.resetEditorFontSize());
+    this.zoomHint.querySelector('.zoom-hint-reset').addEventListener('click', () => {
+      const tab = this.activeTab;
+      if (!tab) return;
+      // 若当前预览字号偏离基准 → 还原预览；否则还原编辑器
+      if (tab.previewFontSize != null && tab.previewFontSize !== this.settings.previewFontSize) {
+        this.resetPreviewFontSize();
+      } else {
+        this.resetEditorFontSize();
+      }
+    });
+
     this.cm.on('change', () => {
       this.activeTab.content = this.cm.getValue();
       this.updateTabDisplay();
@@ -3021,6 +3088,8 @@ class MarkdownEditor {
       // 每标签独立字号：未初始化时按设置字号
       if (newTab.fontSize == null) newTab.fontSize = this.settings.fontSize;
       this.cm.getWrapperElement().style.fontSize = newTab.fontSize + 'px';
+      // 每标签独立预览字号
+      this.preview.style.fontSize = (newTab.previewFontSize ?? this.settings.previewFontSize) + 'px';
       this.hideZoomHint();
 
       if (!newTab._loaded && newTab.filePath) {
