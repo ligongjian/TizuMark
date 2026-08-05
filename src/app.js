@@ -165,6 +165,9 @@ const I18N = {
     ecbIgnoreAll: '全部忽略',
     openFailed: '打开失败',
     exportFailed: '导出失败',
+    saveImage: '保存图片',
+    savedImage: '已保存图片',
+    saveImageFailed: '保存图片失败',
     fileModified: '已修改，是否保存？',
     saveChanges: '保存更改',
     dontSave: '不保存',
@@ -512,6 +515,9 @@ const I18N = {
     failed: 'Failed',
     openFailed: 'Open failed',
     exportFailed: 'Export failed',
+    saveImage: 'Save image',
+    savedImage: 'Image saved',
+    saveImageFailed: 'Failed to save image',
     fileModified: ' has been modified. Save?',
     saveChanges: 'Save Changes',
     dontSave: 'Don\'t Save',
@@ -4644,7 +4650,7 @@ class MarkdownEditor {
       if (img && img.src) {
         e.preventDefault();
         e.stopPropagation();
-        this.showImageLightbox(img.src);
+        this.showImageLightbox(img);
         return;
       }
 
@@ -4804,11 +4810,11 @@ class MarkdownEditor {
     }, true);
   }
 
-  showImageLightbox(src) {
-    this.showLightbox(src, 'image');
+  showImageLightbox(imgEl) {
+    this.showLightbox(imgEl.src, 'image', imgEl);
   }
 
-  showLightbox(content, type) {
+  showLightbox(content, type, imgEl) {
     let scale = 1, tx = 0, ty = 0;
     let naturalW = 0, naturalH = 0;
     let isDragging = false, startX = 0, startY = 0, startTx = 0, startTy = 0;
@@ -4835,6 +4841,177 @@ class MarkdownEditor {
     overlay.appendChild(hint);
     overlay.appendChild(el);
     document.body.appendChild(overlay);
+
+    // ====== 保存图片：格式选择器 + 保存逻辑 ======
+    const formatPicker = document.createElement('div');
+    formatPicker.className = 'lightbox-format-picker';
+    formatPicker.style.display = 'none';
+    document.body.appendChild(formatPicker);
+
+    // 判断图片是否是矢量图（SVG）：只有矢量图才支持以 SVG 格式保存源文件
+    const isVector = (() => {
+      if (type === 'svg') return true;
+      const srcLower = content.toLowerCase();
+      const suffix = srcLower.slice(srcLower.lastIndexOf('.'));
+      return suffix === '.svg';
+    })();
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'lightbox-toolbar-btn';
+    saveBtn.textContent = '💾';
+    saveBtn.title = this.t('saveImage');
+    const toolbar = document.createElement('div');
+    toolbar.className = 'lightbox-toolbar';
+    toolbar.appendChild(saveBtn);
+    overlay.appendChild(toolbar);
+
+    const removePicker = () => {
+      formatPicker.style.display = 'none';
+      document.removeEventListener('click', onPickerClick);
+    };
+    const onPickerClick = (e) => {
+      if (e.target === saveBtn || saveBtn.contains(e.target)) return;
+      if (!formatPicker.contains(e.target)) removePicker();
+    };
+
+    const save = async (format) => {
+      removePicker();
+      try {
+        let bytes;
+        let ext = format;
+        if (format === 'svg') {
+          let svgMarkup;
+          if (type === 'svg') {
+            svgMarkup = content.outerHTML;
+          } else {
+            // 位图 img 标签承载 svg+xml：从 src 取出文本
+            let src = content;
+            if (src.startsWith('data:image/svg+xml;base64,')) {
+              svgMarkup = decodeURIComponent(atob(src.slice(26)));
+            } else if (src.startsWith('data:image/svg+xml,')) {
+              svgMarkup = decodeURIComponent(src.slice(17));
+            } else {
+              const resp = await fetch(src);
+              svgMarkup = await resp.text();
+            }
+            bytes = new TextEncoder().encode(svgMarkup);
+            let path = await dialogSave({
+              defaultPath: 'image.svg',
+              filters: [{ name: 'SVG', extensions: ['svg'] }]
+            });
+            if (!path) return;
+            await this._saveBytesToFile(path, bytes);
+            this.setStatus(`${this.t('savedImage')}: ${path}`);
+            return;
+          }
+          bytes = new TextEncoder().encode(svgMarkup);
+        } else {
+          // PNG
+          if (type === 'svg') {
+            // 将 SVG 栅格化为 PNG（按原始尺寸 + 当前缩放，取较高清晰度）
+            const svgEl = content.cloneNode(true);
+            const width = naturalW > 0 ? naturalW : 800;
+            const height = naturalH > 0 ? naturalH : 600;
+            svgEl.setAttribute('width', width);
+            svgEl.setAttribute('height', height);
+            const svgStr = new XMLSerializer().serializeToString(svgEl);
+            const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+            const svgUrl = URL.createObjectURL(svgBlob);
+            const c = document.createElement('canvas');
+            c.width = Math.round(width * 2);
+            c.height = Math.round(height * 2);
+            const ctx = c.getContext('2d');
+            ctx.scale(2, 2);
+            const tmpImg = new Image();
+            await new Promise((resolve, reject) => { tmpImg.onload = resolve; tmpImg.onerror = reject; tmpImg.src = svgUrl; });
+            ctx.drawImage(tmpImg, 0, 0, width, height);
+            URL.revokeObjectURL(svgUrl);
+            const pngData = c.toDataURL('image/png');
+            const b64 = pngData.split(',')[1];
+            bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+          } else {
+            // 位图：先尝试 fetch 取原始字节（保持原图清晰度），失败则 canvas 兜底
+            const src = imgEl.src.toLowerCase();
+            try {
+              if (src.startsWith('data:')) {
+                // data URL：直接解析 base64 / 文本
+                const comma = src.indexOf(',');
+                const meta = src.slice(0, comma);
+                const mimeMatch = meta.match(/data:([^;]+)/);
+                const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+                const b64 = src.slice(comma + 1);
+                const bin = atob(b64);
+                const len = bin.length;
+                const arr = new Uint8Array(len);
+                for (let i = 0; i < len; i++) arr[i] = bin.charCodeAt(i);
+                bytes = arr;
+              } else {
+                // blob: / http(s): — 用 fetch
+                const resp = await fetch(content);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                bytes = new Uint8Array(await resp.arrayBuffer());
+              }
+            } catch {
+              // fetch 失败（如 blob URL 受限）：canvas 兜底
+              const c2 = document.createElement('canvas');
+              c2.width = imgEl.naturalWidth;
+              c2.height = imgEl.naturalHeight;
+              if (c2.width <= 0 || c2.height <= 0) throw new Error(this.t('imageLoadFailed'));
+              const ctx2 = c2.getContext('2d');
+              ctx2.drawImage(imgEl, 0, 0, c2.width, c2.height);
+              const pngData = c2.toDataURL('image/png');
+              const b64 = pngData.split(',')[1];
+              bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+            }
+            // 从 img 元素或 src 推断原始扩展名
+            if (imgEl) {
+              try {
+                const srcLower = imgEl.src.toLowerCase();
+                const p = srcLower.match(/\.(png|jpg|jpeg|gif|webp)$/i);
+                if (p) ext = p[1].toLowerCase() === 'jpeg' ? 'jpg' : p[1].toLowerCase();
+              } catch { /* ignore */ }
+            }
+          }
+        }
+        let path = await dialogSave({
+          defaultPath: `image.${ext}`,
+          filters: [{ name: ext.toUpperCase(), extensions: [ext] }]
+        });
+        if (!path) return;
+        await this._saveBytesToFile(path, bytes);
+        this.setStatus(`${this.t('savedImage')}: ${path}`);
+      } catch (err) {
+        this.setStatus(`${this.t('saveImageFailed')}: ${err}`);
+      }
+    };
+
+    const togglePicker = () => {
+      if (formatPicker.style.display !== 'none') {
+        removePicker();
+        return;
+      }
+      const rect = saveBtn.getBoundingClientRect();
+      formatPicker.style.left = (rect.left + rect.width - 130) + 'px';
+      formatPicker.style.top = (rect.bottom + 6) + 'px';
+      formatPicker.innerHTML = '';
+
+      const makeItem = (fmt, label) => {
+        const item = document.createElement('div');
+        item.className = 'lightbox-format-item';
+        item.innerHTML = `<span class="fmt-label">${label}</span>`;
+        item.addEventListener('click', () => save(fmt));
+        formatPicker.appendChild(item);
+      };
+      makeItem('png', 'PNG');
+      if (isVector) makeItem('svg', 'SVG');
+
+      formatPicker.style.display = 'flex';
+      document.addEventListener('click', onPickerClick);
+    };
+    saveBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      togglePicker();
+    });
 
     const updateTransform = () => {
       el.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
@@ -5983,6 +6160,11 @@ ${clone.innerHTML}
         clone.parentNode.removeChild(clone);
       }
     }
+  }
+
+  async _saveBytesToFile(path, bytes) {
+    const arr = Array.from(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
+    await invoke('write_binary_file', { path, contents: arr });
   }
 
   async exportPDF() {
